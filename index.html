@@ -76,7 +76,10 @@ tr.flashrow td{animation:rowflash 1.2s ease 3}
 .chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 12px;font-size:12px;font-weight:600;color:var(--muted)}
 .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
 .feed{display:flex;flex-direction:column;gap:8px;max-height:520px;overflow:auto}
-.ev{border-left:4px solid var(--line);background:#faf7f1;border-radius:0 9px 9px 0;padding:8px 10px;font-size:13px;animation:slide .35s ease}
+.ev{border-left:4px solid var(--line);background:#faf7f1;border-radius:0 9px 9px 0;padding:8px 10px;font-size:13px}
+.ev.new{animation:slide .35s ease}
+#toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,30px);background:var(--ink);color:#fff;padding:12px 20px;border-radius:12px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:.25s;max-width:90vw;z-index:50}
+#toast.on{opacity:1;transform:translate(-50%,0)}
 @keyframes slide{from{opacity:0;transform:translateX(12px)}}
 .ev.ai{border-color:var(--blue)} .ev.sys{border-color:var(--muted)}
 .ev small{display:block;color:var(--muted);font-size:11px;margin-bottom:2px;font-weight:700;letter-spacing:.5px}
@@ -91,7 +94,7 @@ tr.flashrow td{animation:rowflash 1.2s ease 3}
 <header>
   <div class="logo">GioMà<small>Pizzeria · Gestionale tavoli</small></div>
   <div class="sp"></div>
-  <div class="pill"><span class="dot" id="dot"></span><span id="liveTxt">Live</span></div>
+  <div class="pill"><span class="dot" id="dot"></span><span id="liveTxt">Live</span> <small id="upd" style="opacity:.8"></small></div>
   <div class="pill" id="clock">—</div>
   <button class="btn ghost" id="btnLive">Pausa</button>
   <button class="btn" id="btnReset">Ripristina dati demo</button>
@@ -138,11 +141,12 @@ tr.flashrow td{animation:rowflash 1.2s ease 3}
     <div class="cap" style="margin-top:10px">Demo: nessun SMS o notifica reale viene inviato ai clienti.</div>
   </section>
 </main>
+<div id="toast"></div>
 
 <script>
 const API='https://hook.eu1.make.com/jzg08sfsepuik3quqf9j8n2ceqt5r0f7';
-const POLL_MS=4000;
-let S=null, sel=null, serv='cena', filter='tutte', live=true, busy=false, lastUltimo=null, lastVerTs=null, resetArm=false, lastLog=0, userPicked=false;
+const GAP_MS=700;
+let S=null, sel=null, serv='cena', filter='tutte', live=true, busy=false, lastUltimo=null, lastVerTs=null, resetArm=false, lastSig='', seen=new Set(), firstLoad=true;
 const $=id=>document.getElementById(id);
 const wd=['dom','lun','mar','mer','gio','ven','sab'];
 const wdFull=['domenica','lunedì','martedì','mercoledì','giovedì','venerdì','sabato'];
@@ -163,10 +167,27 @@ async function refresh(params){
   if(busy)return; busy=true;
   try{
     const j=await api(params||{azione:'stato'});
-    S=j.stato; $('err').style.display='none';
-    onData(); render();
+    apply(j.stato);
   }catch(e){ $('err').style.display='block'; }
   busy=false;
+}
+function apply(st){
+  $('err').style.display='none';
+  const sig=JSON.stringify(st);
+  $('upd').textContent='agg. '+new Date().toLocaleTimeString('it-IT',{timeZone:'Europe/Rome'});
+  if(sig===lastSig) return;
+  lastSig=sig; S=st; onData(); render(); notify();
+}
+async function act(params){
+  try{ const j=await api(params); apply(j.stato); }catch(e){ $('err').style.display='block'; }
+}
+function notify(){
+  const keys=S.log.map(e=>e.t+'|'+e.testo);
+  const fresh=S.log.filter((e,i)=>!seen.has(keys[i]));
+  keys.forEach(k=>seen.add(k));
+  if(firstLoad){firstLoad=false;return;}
+  const last=fresh.filter(e=>e.tipo==='ai').pop()||fresh.pop();
+  if(last){const t=$('toast');t.textContent=(last.tipo==='ai'?'\u{1F916} ':'')+last.testo;t.classList.add('on');clearTimeout(notify.h);notify.h=setTimeout(()=>t.classList.remove('on'),3500);}
 }
 function days(){
   const set=new Set(S.prenotazioni.map(p=>p.data));
@@ -256,11 +277,12 @@ function render(){
       <td><span class="src ${p.fonte==='AI'?'ai':''}">${p.fonte==='AI'?'🤖 Assistente AI':'Telefono'}</span></td>
       <td style="white-space:nowrap">${p.stato!=='Confermata'?`<button class="mini" data-a="conferma" data-id="${p.id}">Conferma</button> `:''}<button class="mini x" data-a="elimina" data-id="${p.id}">Elimina</button></td>
     </tr>`).join(''):'<tr><td colspan="8" class="empty">Nessuna prenotazione</td></tr>';
-  $('rows').querySelectorAll('.mini').forEach(b=>b.onclick=()=>refresh({azione:b.dataset.a,id:b.dataset.id}));
+  $('rows').querySelectorAll('.mini').forEach(b=>b.onclick=()=>act({azione:b.dataset.a,id:b.dataset.id}));
 
   // feed
   const log=S.log.slice().reverse();
-  $('feed').innerHTML=log.length?log.map((e,i)=>`<div class="ev ${e.tipo}"><small>${e.t} · ${e.tipo==='ai'?'ASSISTENTE AI':'GESTIONALE'}</small>${esc(e.testo)}</div>`).join(''):'<div class="empty">In attesa di attività…</div>';
+  const newKeys=new Set(S.log.map(e=>e.t+'|'+e.testo).filter(k=>!seen.has(k)));
+  $('feed').innerHTML=log.length?log.map((e,i)=>`<div class="ev ${e.tipo} ${newKeys.has(e.t+'|'+e.testo)?'new':''}"><small>${e.t} · ${e.tipo==='ai'?'ASSISTENTE AI':'GESTIONALE'}</small>${esc(e.testo)}</div>`).join(''):'<div class="empty">In attesa di attività…</div>';
 }
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
@@ -270,13 +292,13 @@ $('btnLive').onclick=()=>{live=!live;$('btnLive').textContent=live?'Pausa':'Ripr
 $('btnReset').onclick=()=>{
   if(!resetArm){resetArm=true;$('btnReset').textContent='Clicca ancora per confermare';setTimeout(()=>{resetArm=false;$('btnReset').textContent='Ripristina dati demo';},3500);return;}
   resetArm=false;$('btnReset').textContent='Ripristino…';lastUltimo=null;lastVerTs=null;sel=null;
-  api({azione:'reset'}).then(j=>{S=j.stato;onData();render();}).catch(()=>{$('err').style.display='block';}).finally(()=>{$('btnReset').textContent='Ripristina dati demo';});
+  api({azione:'reset'}).then(j=>{lastSig='';seen=new Set();firstLoad=true;apply(j.stato);}).catch(()=>{$('err').style.display='block';}).finally(()=>{$('btnReset').textContent='Ripristina dati demo';});
 };
 function tick(){ const d=new Date(); $('clock').textContent=d.toLocaleString('it-IT',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',timeZone:'Europe/Rome'}); }
 setInterval(tick,15000); tick();
-setInterval(()=>{ if(live&&!document.hidden) refresh(); },POLL_MS);
+function loop(){ ((live&&!document.hidden)?refresh():Promise.resolve()).finally(()=>setTimeout(loop,GAP_MS)); }
+loop();
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&live) refresh(); });
-refresh();
 </script>
 </body>
 </html>
