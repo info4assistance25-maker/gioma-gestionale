@@ -144,8 +144,8 @@ tr.flashrow td{animation:rowflash 1.2s ease 3}
 <div id="toast"></div>
 
 <script>
-const API='https://hook.eu1.make.com/jzg08sfsepuik3quqf9j8n2ceqt5r0f7';
-const GAP_MS=700;
+const API=(location.protocol==='http:'||location.protocol==='https:')?'/api/gestionale':'https://gioma-gestionale.vercel.app/api/gestionale';
+const GAP_MS=400;
 let S=null, sel=null, serv='cena', filter='tutte', live=true, busy=false, lastUltimo=null, lastVerTs=null, resetArm=false, lastSig='', seen=new Set(), firstLoad=true;
 const $=id=>document.getElementById(id);
 const wd=['dom','lun','mar','mer','gio','ven','sab'];
